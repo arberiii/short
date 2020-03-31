@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/short-d/short/app/adapter/graphql/resolver"
+	"github.com/short-d/short/app/usecase/auth/payload"
+	"github.com/short-d/short/app/usecase/auth/token"
+
 	"github.com/short-d/app/mdtest"
 	"github.com/short-d/short/app/adapter/db"
 	"github.com/short-d/short/app/usecase/auth"
@@ -27,6 +31,7 @@ func TestGraphQlAPI(t *testing.T) {
 	keyFetcher := service.NewKeyFetcherFake([]service.Key{})
 	keyGen, err := keygen.NewKeyGenerator(2, &keyFetcher)
 	mdtest.Equal(t, nil, err)
+
 	longLinkValidator := validator.NewLongLink()
 	customAliasValidator := validator.NewCustomAlias()
 	creator := url.NewCreatorPersist(
@@ -39,10 +44,27 @@ func TestGraphQlAPI(t *testing.T) {
 
 	s := service.NewReCaptchaFake(service.VerifyResponse{})
 	verifier := requester.NewVerifier(s)
-	authenticator := auth.NewAuthenticatorFake(time.Now(), time.Hour)
+	authFactory := newAuthenticatorFactory(time.Now(), time.Hour)
 
 	logger := mdtest.NewLoggerFake(mdtest.FakeLoggerArgs{})
 	tracer := mdtest.NewTracerFake()
-	graphqlAPI := NewShort(&logger, &tracer, retriever, creator, verifier, authenticator)
+	payloadFactory := payload.FactoryStub{Payload: payload.Stub{}}
+	graphQLResolver := resolver.NewResolver(
+		&logger,
+		&tracer,
+		retriever,
+		creator,
+		verifier,
+		authFactory,
+		payloadFactory,
+	)
+	graphqlAPI := NewShort(graphQLResolver)
 	mdtest.Equal(t, true, mdtest.IsGraphQlAPIValid(graphqlAPI))
+}
+
+func newAuthenticatorFactory(now time.Time, tokenValidDuration time.Duration) auth.AuthenticatorFactory {
+	tokenizer := mdtest.NewCryptoTokenizerFake()
+	timer := mdtest.NewTimerFake(now)
+	tokenIssuerFactory := token.NewIssuerFactory(tokenizer, timer)
+	return auth.NewAuthenticatorFactory(timer, tokenValidDuration, tokenIssuerFactory)
 }

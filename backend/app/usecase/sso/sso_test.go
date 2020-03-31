@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/short-d/short/app/usecase/auth/payload"
+	"github.com/short-d/short/app/usecase/auth/token"
+
 	"github.com/short-d/app/mdtest"
 	"github.com/short-d/short/app/entity"
 	"github.com/short-d/short/app/usecase/account"
@@ -66,7 +69,14 @@ func TestSingleSignOn_SignIn(t *testing.T) {
 			accountProvider := account.NewProvider(&fakeUserRepo, fakeTimer)
 
 			now := time.Now()
-			authenticator := auth.NewAuthenticatorFake(now, time.Minute)
+			authFactory := newAuthenticatorFactory(now, time.Minute)
+			user := entity.User{
+				Email: testCase.ssoUser.Email,
+				Name:  testCase.ssoUser.Name,
+			}
+			payloadStub := payload.Email{User: user}
+			payloadFactory := payload.FactoryStub{Payload: payloadStub}
+			authenticator := authFactory.MakeAuthenticator(payloadFactory)
 
 			singleSignOn := NewSingleSignOn(identityProvider, profileService, accountProvider, authenticator)
 			gotAuthToken, err := singleSignOn.SignIn(testCase.authorizationCode)
@@ -87,4 +97,11 @@ func TestSingleSignOn_SignIn(t *testing.T) {
 			mdtest.Equal(t, expAuthToken, gotAuthToken)
 		})
 	}
+}
+
+func newAuthenticatorFactory(now time.Time, tokenValidDuration time.Duration) auth.AuthenticatorFactory {
+	tokenizer := mdtest.NewCryptoTokenizerFake()
+	timer := mdtest.NewTimerFake(now)
+	tokenIssuerFactory := token.NewIssuerFactory(tokenizer, timer)
+	return auth.NewAuthenticatorFactory(timer, tokenValidDuration, tokenIssuerFactory)
 }

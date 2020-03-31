@@ -3,48 +3,116 @@
 package auth
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/short-d/short/app/usecase/auth/token"
 
 	"github.com/short-d/app/fw"
 	"github.com/short-d/app/mdtest"
 	"github.com/short-d/short/app/entity"
+	"github.com/short-d/short/app/usecase/auth/payload"
 )
 
 func TestAuthenticator_GenerateToken(t *testing.T) {
-	tokenizer := mdtest.NewCryptoTokenizerFake()
-	expIssuedAt := time.Now()
-	timer := mdtest.NewTimerFake(expIssuedAt)
-	authenticator := NewAuthenticator(tokenizer, timer, 2*time.Millisecond)
+	t.Parallel()
 
-	expUser := entity.User{
-		Email: "test@s.time4hacks.com",
+	testCases := []struct {
+		name                 string
+		issuedAt             string
+		fromUserPayload      payload.Payload
+		expectedTokenPayload fw.TokenPayload
+	}{
+		{
+			name:     "empty payload",
+			issuedAt: "2006-01-02T15:04:05Z",
+			fromUserPayload: payload.Stub{
+				TokenPayload: map[string]interface{}{},
+			},
+			expectedTokenPayload: map[string]interface{}{
+				"issued_at": "2006-01-02T15:04:05Z",
+			},
+		},
+		{
+			name:     "payload contains ID and email",
+			issuedAt: "2006-01-02T15:04:05Z",
+			fromUserPayload: payload.Stub{
+				TokenPayload: map[string]interface{}{
+					"id":    "alpha",
+					"email": "alpha@example.com",
+				},
+			},
+			expectedTokenPayload: map[string]interface{}{
+				"id":        "alpha",
+				"email":     "alpha@example.com",
+				"issued_at": "2006-01-02T15:04:05Z",
+			},
+		},
+		{
+			name:     "issue_at is override to current time",
+			issuedAt: "2006-01-02T15:04:05Z",
+			fromUserPayload: payload.Stub{
+				TokenPayload: map[string]interface{}{
+					"id":        "alpha",
+					"email":     "alpha@example.com",
+					"issued_at": "2001-02-05T15:04:05Z",
+				},
+			},
+			expectedTokenPayload: map[string]interface{}{
+				"id":        "alpha",
+				"email":     "alpha@example.com",
+				"issued_at": "2006-01-02T15:04:05Z",
+			},
+		},
 	}
-	token, err := authenticator.GenerateToken(expUser)
-	mdtest.Equal(t, nil, err)
 
-	tokenPayload, err := tokenizer.Decode(token)
-	mdtest.Equal(t, nil, err)
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	mdtest.Equal(t, expUser.Email, tokenPayload["email"])
+			tokenizer := mdtest.NewCryptoTokenizerFake()
+			now, err := time.Parse(time.RFC3339, testCase.issuedAt)
+			mdtest.Equal(t, nil, err)
 
-	expIssuedAtStr := expIssuedAt.Format(time.RFC3339Nano)
-	mdtest.Equal(t, expIssuedAtStr, tokenPayload["issued_at"])
+			timer := mdtest.NewTimerFake(now)
+			payloadFactory := payload.FactoryStub{
+				Payload: testCase.fromUserPayload,
+			}
+
+			tokenIssuerFactory := token.NewIssuerFactory(tokenizer, timer)
+			authenticatorFactory := NewAuthenticatorFactory(
+				timer,
+				2*time.Millisecond,
+				tokenIssuerFactory,
+			)
+			authenticator := authenticatorFactory.MakeAuthenticator(payloadFactory)
+
+			authToken, err := authenticator.GenerateToken(entity.User{})
+			mdtest.Equal(t, nil, err)
+
+			tokenPayload, err := tokenizer.Decode(authToken)
+			mdtest.Equal(t, nil, err)
+			mdtest.Equal(t, testCase.expectedTokenPayload, tokenPayload)
+		})
+	}
 }
 
 func TestAuthenticator_IsSignedIn(t *testing.T) {
 	now := time.Now()
 
 	testCases := []struct {
-		name               string
-		expIssuedAt        time.Time
-		tokenValidDuration time.Duration
-		currentTime        time.Time
-		tokenPayload       fw.TokenPayload
-		expIsSignIn        bool
+		name                  string
+		expIssuedAt           time.Time
+		tokenValidDuration    time.Duration
+		currentTime           time.Time
+		tokenPayload          fw.TokenPayload
+		userInfoValidationErr error
+		expIsSignIn           bool
 	}{
 		{
-			name:               "Token payload empty",
+			name:               "empty token payload",
 			expIssuedAt:        now,
 			tokenValidDuration: time.Hour,
 			currentTime:        now.Add(30 * time.Minute),
@@ -52,57 +120,46 @@ func TestAuthenticator_IsSignedIn(t *testing.T) {
 			expIsSignIn:        false,
 		},
 		{
-			name:               "Token payload without email",
-			expIssuedAt:        now,
-			tokenValidDuration: time.Hour,
-			currentTime:        now.Add(30 * time.Minute),
-			tokenPayload: map[string]interface{}{
-				"issued_at": now.Format(time.RFC3339Nano),
-			},
-			expIsSignIn: false,
-		},
-		{
-			name:               "Token payload has empty email",
-			expIssuedAt:        now,
-			tokenValidDuration: time.Hour,
-			currentTime:        now.Add(30 * time.Minute),
-			tokenPayload: map[string]interface{}{
-				"email":     "",
-				"issued_at": now.Format(time.RFC3339Nano),
-			},
-			expIsSignIn: false,
-		},
-		{
-			name:               "Token payload without issue_at",
-			expIssuedAt:        now,
-			tokenValidDuration: time.Hour,
-			currentTime:        now.Add(30 * time.Minute),
-			tokenPayload: map[string]interface{}{
-				"email": "test@s.time4hacks.com",
-			},
-			expIsSignIn: false,
-		},
-		{
-			name:               "Token expired",
+			name:               "token expired",
 			expIssuedAt:        now,
 			tokenValidDuration: time.Hour,
 			currentTime:        now.Add(2 * time.Hour),
 			tokenPayload: map[string]interface{}{
-				"email":     "test@s.time4hacks.com",
-				"issued_at": now.Format(time.RFC3339Nano),
+				"issued_at": now.Format(time.RFC3339),
 			},
 			expIsSignIn: false,
 		},
 		{
-			name:               "Token valid",
+			name:               "token valid",
 			expIssuedAt:        now,
 			tokenValidDuration: time.Hour,
 			currentTime:        now.Add(30 * time.Minute),
 			tokenPayload: map[string]interface{}{
-				"email":     "test@s.time4hacks.com",
-				"issued_at": now.Format(time.RFC3339Nano),
+				"issued_at": now.Format(time.RFC3339),
 			},
 			expIsSignIn: true,
+		},
+		{
+			name:               "incorrect user info",
+			expIssuedAt:        now,
+			tokenValidDuration: time.Hour,
+			currentTime:        now.Add(30 * time.Minute),
+			tokenPayload: map[string]interface{}{
+				"email":     "alpha@example.com",
+				"issued_at": now.Format(time.RFC3339),
+			},
+			userInfoValidationErr: errors.New("user ID not found in token payload"),
+			expIsSignIn:           false,
+		},
+		{
+			name:               "no issue_at in the payload",
+			expIssuedAt:        now,
+			tokenValidDuration: time.Hour,
+			currentTime:        now.Add(30 * time.Minute),
+			tokenPayload: map[string]interface{}{
+				"email": "alpha@example.com",
+			},
+			expIsSignIn: false,
 		},
 	}
 
@@ -110,7 +167,18 @@ func TestAuthenticator_IsSignedIn(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			tokenizer := mdtest.NewCryptoTokenizerFake()
 			timer := mdtest.NewTimerFake(testCase.currentTime)
-			authenticator := NewAuthenticator(tokenizer, timer, testCase.tokenValidDuration)
+			payloadStub := payload.Stub{TokenPayload: testCase.tokenPayload}
+			payloadFactory := payload.FactoryStub{
+				Payload:  payloadStub,
+				TokenErr: testCase.userInfoValidationErr,
+			}
+			tokenIssuerFactory := token.NewIssuerFactory(tokenizer, timer)
+			authenticatorFactory := NewAuthenticatorFactory(
+				timer,
+				testCase.tokenValidDuration,
+				tokenIssuerFactory,
+			)
+			authenticator := authenticatorFactory.MakeAuthenticator(payloadFactory)
 
 			token, err := tokenizer.Encode(testCase.tokenPayload)
 			mdtest.Equal(t, nil, err)
@@ -124,82 +192,69 @@ func TestAuthenticator_GetUser(t *testing.T) {
 	now := time.Now()
 
 	testCases := []struct {
-		name               string
-		expIssuedAt        time.Time
-		tokenValidDuration time.Duration
-		currentTime        time.Time
-		tokenPayload       fw.TokenPayload
-		hasErr             bool
-		expUser            entity.User
+		name                  string
+		tokenValidDuration    time.Duration
+		currentTime           time.Time
+		tokenPayload          fw.TokenPayload
+		user                  entity.User
+		userInfoValidationErr error
+		hasErr                bool
+		expectedUser          entity.User
 	}{
 		{
-			name:               "Token payload empty",
-			expIssuedAt:        now,
+			name:               "empty token payload",
 			tokenValidDuration: time.Hour,
 			currentTime:        now.Add(30 * time.Minute),
 			tokenPayload:       map[string]interface{}{},
 			hasErr:             true,
-			expUser:            entity.User{},
 		},
 		{
-			name:               "Token payload without email",
-			expIssuedAt:        now,
-			tokenValidDuration: time.Hour,
-			currentTime:        now.Add(30 * time.Minute),
-			tokenPayload: map[string]interface{}{
-				"issued_at": now.Format(time.RFC3339Nano),
-			},
-			hasErr:  true,
-			expUser: entity.User{},
-		},
-		{
-			name:               "Token payload without issue_at",
-			expIssuedAt:        now,
-			tokenValidDuration: time.Hour,
-			currentTime:        now.Add(30 * time.Minute),
-			tokenPayload: map[string]interface{}{
-				"email": "test@s.time4hacks.com",
-			},
-			hasErr:  true,
-			expUser: entity.User{},
-		},
-		{
-			name:               "Token expired",
-			expIssuedAt:        now,
+			name:               "token expired",
 			tokenValidDuration: time.Hour,
 			currentTime:        now.Add(2 * time.Hour),
 			tokenPayload: map[string]interface{}{
-				"email":     "test@s.time4hacks.com",
-				"issued_at": now.Format(time.RFC3339Nano),
+				"issued_at": now.Format(time.RFC3339),
 			},
-			hasErr:  true,
-			expUser: entity.User{},
+			hasErr: true,
 		},
 		{
-			name:               "Valid token with empty email",
-			expIssuedAt:        now,
+			name:               "token valid",
 			tokenValidDuration: time.Hour,
 			currentTime:        now.Add(30 * time.Minute),
 			tokenPayload: map[string]interface{}{
-				"email":     "",
-				"issued_at": now.Format(time.RFC3339Nano),
+				"issued_at": now.Format(time.RFC3339),
 			},
-			hasErr:  true,
-			expUser: entity.User{},
-		},
-		{
-			name:               "Token valid with correct email",
-			expIssuedAt:        now,
-			tokenValidDuration: time.Hour,
-			currentTime:        now.Add(30 * time.Minute),
-			tokenPayload: map[string]interface{}{
-				"email":     "test@s.time4hacks.com",
-				"issued_at": now.Format(time.RFC3339Nano),
+			user: entity.User{
+				ID:    "alpha",
+				Name:  "Alpha",
+				Email: "alpha@example.com",
 			},
 			hasErr: false,
-			expUser: entity.User{
-				Email: "test@s.time4hacks.com",
+			expectedUser: entity.User{
+				ID:    "alpha",
+				Name:  "Alpha",
+				Email: "alpha@example.com",
 			},
+		},
+		{
+			name:               "incorrect user info",
+			tokenValidDuration: time.Hour,
+			currentTime:        now.Add(30 * time.Minute),
+			tokenPayload: map[string]interface{}{
+				"email":     "alpha@example.com",
+				"issued_at": now.Format(time.RFC3339),
+			},
+			userInfoValidationErr: errors.New("user ID not found in token payload"),
+			hasErr:                true,
+		},
+		{
+			name:               "no issue_at in the payload",
+			tokenValidDuration: time.Hour,
+			currentTime:        now.Add(30 * time.Minute),
+			tokenPayload: map[string]interface{}{
+				"email": "alpha@example.com",
+			},
+			hasErr: true,
 		},
 	}
 
@@ -207,7 +262,21 @@ func TestAuthenticator_GetUser(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			tokenizer := mdtest.NewCryptoTokenizerFake()
 			timer := mdtest.NewTimerFake(testCase.currentTime)
-			authenticator := NewAuthenticator(tokenizer, timer, testCase.tokenValidDuration)
+			tokenPayloadStub := payload.Stub{
+				TokenPayload: testCase.tokenPayload,
+				User:         testCase.user,
+			}
+			payloadFactory := payload.FactoryStub{
+				Payload:  tokenPayloadStub,
+				TokenErr: testCase.userInfoValidationErr,
+			}
+			tokenIssuerFactory := token.NewIssuerFactory(tokenizer, timer)
+			authenticatorFactory := NewAuthenticatorFactory(
+				timer,
+				testCase.tokenValidDuration,
+				tokenIssuerFactory,
+			)
+			authenticator := authenticatorFactory.MakeAuthenticator(payloadFactory)
 
 			token, err := tokenizer.Encode(testCase.tokenPayload)
 			mdtest.Equal(t, nil, err)
@@ -216,7 +285,7 @@ func TestAuthenticator_GetUser(t *testing.T) {
 				mdtest.NotEqual(t, nil, err)
 				return
 			}
-			mdtest.Equal(t, testCase.expUser, gotUser)
+			mdtest.Equal(t, testCase.expectedUser, gotUser)
 		})
 	}
 }

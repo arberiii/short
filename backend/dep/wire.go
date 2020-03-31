@@ -6,6 +6,10 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/short-d/short/app/adapter/graphql/resolver"
+	"github.com/short-d/short/app/usecase/auth/payload"
+	"github.com/short-d/short/app/usecase/auth/token"
+
 	"github.com/google/wire"
 	"github.com/short-d/app/fw"
 	"github.com/short-d/app/modern/mdcli"
@@ -27,7 +31,6 @@ import (
 	"github.com/short-d/short/app/adapter/graphql"
 	"github.com/short-d/short/app/adapter/kgs"
 	"github.com/short-d/short/app/usecase/account"
-	"github.com/short-d/short/app/usecase/keygen"
 	"github.com/short-d/short/app/usecase/repository"
 	"github.com/short-d/short/app/usecase/requester"
 	"github.com/short-d/short/app/usecase/service"
@@ -42,7 +45,8 @@ var authSet = wire.NewSet(
 	provider.NewJwtGo,
 
 	wire.Value(provider.TokenValidDuration(oneDay)),
-	provider.NewAuthenticator,
+	token.NewIssuerFactory,
+	provider.NewAuthenticatorFactory,
 )
 
 var observabilitySet = wire.NewSet(
@@ -120,12 +124,12 @@ func InjectGraphQLService(
 	wire.Build(
 		wire.Bind(new(fw.StdOut), new(mdio.StdOut)),
 		wire.Bind(new(fw.ProgramRuntime), new(mdruntime.BuildIn)),
+		wire.Bind(new(payload.Factory), new(payload.EmailFactory)),
 		wire.Bind(new(fw.GraphQLAPI), new(graphql.Short)),
 		wire.Bind(new(url.Retriever), new(url.RetrieverPersist)),
 		wire.Bind(new(url.Creator), new(url.CreatorPersist)),
 		wire.Bind(new(repository.UserURLRelation), new(db.UserURLRelationSQL)),
 		wire.Bind(new(repository.URL), new(*db.URLSql)),
-		wire.Bind(new(keygen.KeyGenerator), new(keygen.Remote)),
 		wire.Bind(new(service.KeyFetcher), new(kgs.RPC)),
 		wire.Bind(new(fw.HTTPRequest), new(mdrequest.HTTP)),
 
@@ -150,6 +154,8 @@ func InjectGraphQLService(
 		provider.NewKgsRPC,
 		provider.NewReCaptchaService,
 		requester.NewVerifier,
+		payload.NewEmailFactory,
+		resolver.NewResolver,
 		graphql.NewShort,
 	)
 	return mdservice.Service{}, nil

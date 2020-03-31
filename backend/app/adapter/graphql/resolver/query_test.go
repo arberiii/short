@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/short-d/app/fw"
+	"github.com/short-d/short/app/usecase/auth/payload"
+	"github.com/short-d/short/app/usecase/auth/token"
+
 	"github.com/short-d/app/mdtest"
 	"github.com/short-d/short/app/entity"
 	"github.com/short-d/short/app/usecase/auth"
@@ -14,10 +18,20 @@ import (
 )
 
 func TestQuery_AuthQuery(t *testing.T) {
-	authenticator := auth.NewAuthenticatorFake(time.Now(), time.Hour)
 	user := entity.User{
 		Email: "alpha@example.com",
 	}
+	payloadStub := payload.Stub{
+		TokenPayload: fw.TokenPayload{
+			"email": "alpha@example.com",
+		},
+		User: user,
+	}
+	payloadFactory := payload.FactoryStub{
+		Payload: payloadStub,
+	}
+	authenticator := newAuthenticator(time.Now(), time.Hour, payloadFactory)
+
 	authToken, err := authenticator.GenerateToken(user)
 	mdtest.Equal(t, nil, err)
 	randomToken := "random_token"
@@ -56,7 +70,6 @@ func TestQuery_AuthQuery(t *testing.T) {
 			defer sqlDB.Close()
 
 			fakeRepo := repository.NewURLFake(map[string]entity.URL{})
-			authenticator := auth.NewAuthenticatorFake(time.Now(), time.Hour)
 			retrieverFake := url.NewRetrieverPersist(&fakeRepo)
 			logger := mdtest.NewLoggerFake(mdtest.FakeLoggerArgs{})
 			tracer := mdtest.NewTracerFake()
@@ -73,4 +86,20 @@ func TestQuery_AuthQuery(t *testing.T) {
 			mdtest.Equal(t, testCase.expUser, authQuery.user)
 		})
 	}
+}
+
+func newAuthenticator(
+	now time.Time,
+	tokenValidDuration time.Duration,
+	payloadFactory payload.Factory,
+) auth.Authenticator {
+	tokenizer := mdtest.NewCryptoTokenizerFake()
+	timer := mdtest.NewTimerFake(now)
+	tokenIssuerFactory := token.NewIssuerFactory(tokenizer, timer)
+	authFactory := auth.NewAuthenticatorFactory(
+		timer,
+		tokenValidDuration,
+		tokenIssuerFactory,
+	)
+	return authFactory.MakeAuthenticator(payloadFactory)
 }

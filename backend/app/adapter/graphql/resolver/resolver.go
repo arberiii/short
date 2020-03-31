@@ -3,6 +3,7 @@ package resolver
 import (
 	"github.com/short-d/app/fw"
 	"github.com/short-d/short/app/usecase/auth"
+	"github.com/short-d/short/app/usecase/auth/payload"
 	"github.com/short-d/short/app/usecase/requester"
 	"github.com/short-d/short/app/usecase/url"
 )
@@ -13,6 +14,9 @@ type Resolver struct {
 	Mutation
 }
 
+type Factory struct {
+}
+
 // NewResolver creates a new GraphQL resolver.
 func NewResolver(
 	logger fw.Logger,
@@ -20,8 +24,10 @@ func NewResolver(
 	urlRetriever url.Retriever,
 	urlCreator url.Creator,
 	requesterVerifier requester.Verifier,
-	authenticator auth.Authenticator,
+	authenticatorFactory auth.AuthenticatorFactory,
+	payloadFactory payload.Factory,
 ) Resolver {
+	authenticator := authenticatorFactory.MakeAuthenticator(payloadFactory)
 	return Resolver{
 		Query: newQuery(logger, tracer, authenticator, urlRetriever),
 		Mutation: newMutation(

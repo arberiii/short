@@ -3,6 +3,8 @@ package routing
 import (
 	netURL "net/url"
 
+	"github.com/short-d/short/app/usecase/auth/payload"
+
 	"github.com/short-d/app/fw"
 	"github.com/short-d/short/app/adapter/facebook"
 	"github.com/short-d/short/app/adapter/github"
@@ -29,9 +31,11 @@ func NewShort(
 	githubAPI github.API,
 	facebookAPI facebook.API,
 	googleAPI google.API,
-	authenticator auth.Authenticator,
+	authenticatorFactory auth.AuthenticatorFactory,
 	accountProvider account.Provider,
 ) []fw.Route {
+	emailPayloadFactory := payload.NewEmailFactory()
+	authenticator := authenticatorFactory.MakeAuthenticator(emailPayloadFactory)
 	githubSignIn := sso.NewSingleSignOn(
 		githubAPI.IdentityProvider,
 		githubAPI.Account,

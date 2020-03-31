@@ -1,12 +1,8 @@
 package graphql
 
 import (
-	"github.com/short-d/short/app/adapter/graphql/resolver"
-	"github.com/short-d/short/app/usecase/auth"
-	"github.com/short-d/short/app/usecase/requester"
-	"github.com/short-d/short/app/usecase/url"
-
 	"github.com/short-d/app/fw"
+	"github.com/short-d/short/app/adapter/graphql/resolver"
 )
 
 var _ fw.GraphQLAPI = (*Short)(nil)
@@ -28,22 +24,23 @@ func (t Short) GetResolver() fw.Resolver {
 
 // NewShort creates GraphQL API config
 func NewShort(
-	logger fw.Logger,
-	tracer fw.Tracer,
-	urlRetriever url.Retriever,
-	urlCreator url.Creator,
-	requesterVerifier requester.Verifier,
-	authenticator auth.Authenticator,
+	//logger fw.Logger,
+	//tracer fw.Tracer,
+	//urlRetriever url.Retriever,
+	//urlCreator url.Creator,
+	//requesterVerifier requester.Verifier,
+	graphQLResolver resolver.Resolver,
+	//authenticator auth.Authenticator,
 ) Short {
-	r := resolver.NewResolver(
-		logger,
-		tracer,
-		urlRetriever,
-		urlCreator,
-		requesterVerifier,
-		authenticator,
-	)
+	//r := resolver.NewResolver(
+	//	logger,
+	//	tracer,
+	//	urlRetriever,
+	//	urlCreator,
+	//	requesterVerifier,
+	//	authenticator,
+	//)
 	return Short{
-		resolver: &r,
+		resolver: &graphQLResolver,
 	}
 }

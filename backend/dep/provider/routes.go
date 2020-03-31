@@ -24,7 +24,7 @@ func NewShortRoutes(
 	githubAPI github.API,
 	facebookAPI facebook.API,
 	googleAPI google.API,
-	authenticator auth.Authenticator,
+	authenticatorFactory auth.AuthenticatorFactory,
 	accountProvider account.Provider,
 ) []fw.Route {
 	observability := routing.Observability{
@@ -40,7 +40,7 @@ func NewShortRoutes(
 		githubAPI,
 		facebookAPI,
 		googleAPI,
-		authenticator,
+		authenticatorFactory,
 		accountProvider,
 	)
 }

@@ -28,7 +28,10 @@ import (
 	"github.com/short-d/short/app/adapter/github"
 	"github.com/short-d/short/app/adapter/google"
 	"github.com/short-d/short/app/adapter/graphql"
+	"github.com/short-d/short/app/adapter/graphql/resolver"
 	"github.com/short-d/short/app/usecase/account"
+	"github.com/short-d/short/app/usecase/auth/payload"
+	"github.com/short-d/short/app/usecase/auth/token"
 	"github.com/short-d/short/app/usecase/requester"
 	"github.com/short-d/short/app/usecase/url"
 	"github.com/short-d/short/app/usecase/validator"
@@ -70,21 +73,24 @@ func InjectGraphQLService(name string, prefix provider.LogPrefix, logLevel fw.Lo
 	if err != nil {
 		return mdservice.Service{}, err
 	}
-	remote, err := provider.NewKeyGenerator(bufferSize, rpc)
+	keyGenerator, err := provider.NewKeyGenerator(bufferSize, rpc)
 	if err != nil {
 		return mdservice.Service{}, err
 	}
 	longLink := validator.NewLongLink()
 	customAlias := validator.NewCustomAlias()
-	creatorPersist := url.NewCreatorPersist(urlSql, userURLRelationSQL, remote, longLink, customAlias)
+	creatorPersist := url.NewCreatorPersist(urlSql, userURLRelationSQL, keyGenerator, longLink, customAlias)
 	client := mdhttp.NewClient()
 	http := mdrequest.NewHTTP(client)
 	reCaptcha := provider.NewReCaptchaService(http, secret)
 	verifier := requester.NewVerifier(reCaptcha)
-	cryptoTokenizer := provider.NewJwtGo(jwtSecret)
 	tokenValidDuration := _wireTokenValidDurationValue
-	authenticator := provider.NewAuthenticator(cryptoTokenizer, timer, tokenValidDuration)
-	short := graphql.NewShort(local, tracer, retrieverPersist, creatorPersist, verifier, authenticator)
+	cryptoTokenizer := provider.NewJwtGo(jwtSecret)
+	issuerFactory := token.NewIssuerFactory(cryptoTokenizer, timer)
+	authenticatorFactory := provider.NewAuthenticatorFactory(timer, tokenValidDuration, issuerFactory)
+	emailFactory := payload.NewEmailFactory()
+	resolverResolver := resolver.NewResolver(local, tracer, retrieverPersist, creatorPersist, verifier, authenticatorFactory, emailFactory)
+	short := graphql.NewShort(resolverResolver)
 	server := provider.NewGraphGophers(graphqlPath, local, tracer, short)
 	service := mdservice.New(name, server, local)
 	return service, nil
@@ -114,12 +120,13 @@ func InjectRoutingService(name string, prefix provider.LogPrefix, logLevel fw.Lo
 	googleIdentityProvider := provider.NewGoogleIdentityProvider(http, googleClientID, googleClientSecret, googleRedirectURI)
 	googleAccount := google.NewAccount(http)
 	googleAPI := google.NewAPI(googleIdentityProvider, googleAccount)
-	cryptoTokenizer := provider.NewJwtGo(jwtSecret)
 	tokenValidDuration := _wireTokenValidDurationValue
-	authenticator := provider.NewAuthenticator(cryptoTokenizer, timer, tokenValidDuration)
+	cryptoTokenizer := provider.NewJwtGo(jwtSecret)
+	issuerFactory := token.NewIssuerFactory(cryptoTokenizer, timer)
+	authenticatorFactory := provider.NewAuthenticatorFactory(timer, tokenValidDuration, issuerFactory)
 	userSQL := db.NewUserSQL(sqlDB)
 	accountProvider := account.NewProvider(userSQL, timer)
-	v := provider.NewShortRoutes(local, tracer, webFrontendURL, timer, retrieverPersist, api, facebookAPI, googleAPI, authenticator, accountProvider)
+	v := provider.NewShortRoutes(local, tracer, webFrontendURL, timer, retrieverPersist, api, facebookAPI, googleAPI, authenticatorFactory, accountProvider)
 	server := mdrouting.NewBuiltIn(local, tracer, v)
 	service := mdservice.New(name, server, local)
 	return service
@@ -129,7 +136,7 @@ func InjectRoutingService(name string, prefix provider.LogPrefix, logLevel fw.Lo
 
 const oneDay = 24 * time.Hour
 
-var authSet = wire.NewSet(provider.NewJwtGo, wire.Value(provider.TokenValidDuration(oneDay)), provider.NewAuthenticator)
+var authSet = wire.NewSet(provider.NewJwtGo, wire.Value(provider.TokenValidDuration(oneDay)), token.NewIssuerFactory, provider.NewAuthenticatorFactory)
 
 var observabilitySet = wire.NewSet(wire.Bind(new(fw.Logger), new(mdlogger.Local)), provider.NewLocalLogger, mdtracer.NewLocal)
 
