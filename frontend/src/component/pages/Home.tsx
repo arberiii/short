@@ -36,6 +36,7 @@ import { ChangeLogService } from '../../service/ChangeLog.service';
 import { CreateShortLinkSection } from './shared/CreateShortLinkSection';
 import { Toast } from '../ui/Toast';
 import { IClipboardService } from '../../service/clipboardService/Clipboard.service';
+import { PageControl } from '../ui/PageControl';
 
 interface Props {
   uiFactory: UIFactory;
@@ -292,6 +293,9 @@ export class Home extends Component<Props, State> {
             onShortLinkTextFieldChange={this.handleAliasChange}
             onCreateShortLinkButtonClick={this.handleCreateShortLinkClick}
           />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <PageControl totalPages={10} />
         </div>
         <Footer
           uiFactory={this.props.uiFactory}
